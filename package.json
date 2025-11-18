@@ -1,0 +1,53 @@
+{
+  "name": "word-to-html-paste",
+  "displayName": "Word to HTML Paste",
+  "description": "Paste content from Word documents as clean HTML",
+  "version": "0.0.1",
+  "publisher": "skbcg",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/skbcg/vscode-copy-2-html.git"
+  },
+  "engines": {
+    "vscode": "^1.74.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [],
+  "main": "./extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "word-to-html-paste.toggle",
+        "title": "Toggle Word to HTML Paste"
+      },
+      {
+        "command": "word-to-html-paste.paste",
+        "title": "Word to HTML: Paste"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "word-to-html-paste.paste",
+        "key": "cmd+v",
+        "mac": "cmd+v",
+        "when": "editorTextFocus && !editorReadonly"
+      }
+    ]
+  },
+  "scripts": {
+    "lint": "eslint .",
+    "pretest": "npm run lint",
+    "test": "node ./test/runTest.js"
+  },
+  "devDependencies": {
+    "@types/node": "16.x",
+    "@types/vscode": "^1.74.0",
+    "eslint": "^8.26.0"
+  },
+  "dependencies": {
+    "clipboardy": "^5.0.0",
+    "jsdom": "^23.0.0"
+  }
+}
