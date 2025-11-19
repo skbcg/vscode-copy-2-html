@@ -12,15 +12,18 @@ A VS Code extension that converts Microsoft Word HTML content into clean, semant
 
 ### Development
 ```bash
-# Install dependencies
-npm install
+# Install dependencies (production only, goes into node_modules.nosync)
+npm install --omit=dev
 
-# Run linting
+# Run linting (requires eslint config)
 npm run lint
 
 # Package extension for local installation
-npx vsce package
+./package-extension.sh
+# or manually: npx vsce package --allow-star-activation
 ```
+
+**Note**: `node_modules` is a symlink to `node_modules.nosync` to prevent iCloud sync. The packaging script temporarily converts it to a directory for vsce compatibility.
 
 ### Testing & Debugging
 ```bash
@@ -87,7 +90,13 @@ The paste operation follows this flow:
    - Preserves only `href` attribute on anchor tags
    - Applied as final cleanup pass
 
-7. **Formatting** (`formatBlockElements`)
+7. **Whitespace Normalization** (`normalizeWhitespace`)
+   - Replaces non-breaking spaces (U+00A0) with regular spaces
+   - Removes zero-width characters (BOM, zero-width space, etc.)
+   - Handles em/en spaces, figure spaces, thin spaces
+   - Prevents editor warnings about "bad characters"
+
+8. **Formatting** (`formatBlockElements`)
    - Adds newlines after block-level closing tags
    - Ensures readable output structure
 

@@ -142,6 +142,11 @@ async function pasteAsHtml(textEditor, edit) {
         console.log('Contains HTML tags:', clipboardContent?.includes('<') && clipboardContent?.includes('>'));
         console.log('Had HTML content:', hadHtmlContent);
         
+        // Count and log anchor tags for debugging
+        const anchorCount = (clipboardContent?.match(/<a[^>]*>/gi) || []).length;
+        const hrefCount = (clipboardContent?.match(/href\s*=\s*["'][^"']*["']/gi) || []).length;
+        console.log(`Found ${anchorCount} anchor tags with ${hrefCount} href attributes in clipboard`);
+        
         if (!clipboardContent || clipboardContent.trim().length === 0) {
             console.log('Empty clipboard content, aborting');
             vscode.window.showWarningMessage('Clipboard is empty');
@@ -194,9 +199,17 @@ async function pasteAsHtml(textEditor, edit) {
         finalHtml = stripUnwantedAttributes(finalHtml);
         console.log('After stripping attributes (first 500 chars):', finalHtml.substring(0, 500));
         
+        // Verify anchor links are still present
+        const finalAnchorCount = (finalHtml?.match(/<a\s+href/gi) || []).length;
+        console.log(`Final HTML contains ${finalAnchorCount} anchor links with href`);
+        
         // Format with proper line breaks after block elements
         finalHtml = formatBlockElements(finalHtml);
         console.log('After formatting (first 500 chars):', finalHtml.substring(0, 500));
+        
+        // Final pass: normalize all remaining special whitespace characters
+        finalHtml = normalizeWhitespace(finalHtml);
+        console.log('After whitespace normalization (first 500 chars):', finalHtml.substring(0, 500));
 
         // Insert the final HTML
         const selection = textEditor.selection;
@@ -216,6 +229,40 @@ async function pasteAsHtml(textEditor, edit) {
             });
         }
     }
+}
+
+function normalizeWhitespace(html) {
+    // Replace all special whitespace characters with regular spaces
+    // This handles non-breaking spaces and other Unicode whitespace that editors flag
+    let result = html;
+    
+    // Replace various Unicode whitespace characters with regular space
+    result = result.replace(/\u00A0/g, ' ');   // Non-breaking space (most common)
+    result = result.replace(/\u2007/g, ' ');   // Figure space
+    result = result.replace(/\u202F/g, ' ');   // Narrow no-break space
+    result = result.replace(/\u2009/g, ' ');   // Thin space
+    result = result.replace(/\u200A/g, ' ');   // Hair space
+    result = result.replace(/\u2003/g, ' ');   // Em space
+    result = result.replace(/\u2002/g, ' ');   // En space
+    
+    // Remove zero-width characters completely
+    result = result.replace(/\uFEFF/g, '');    // Zero-width no-break space (BOM)
+    result = result.replace(/\u200B/g, '');    // Zero-width space
+    result = result.replace(/\u200C/g, '');    // Zero-width non-joiner
+    result = result.replace(/\u200D/g, '');    // Zero-width joiner
+    
+    // Clean up multiple consecutive spaces (but preserve single spaces)
+    result = result.replace(/ {2,}/g, ' ');
+    
+    // Log if any special characters were found and replaced
+    if (result !== html) {
+        const nbspCount = (html.match(/\u00A0/g) || []).length;
+        if (nbspCount > 0) {
+            console.log(`Normalized ${nbspCount} non-breaking spaces and other special whitespace`);
+        }
+    }
+    
+    return result;
 }
 
 function formatBlockElements(html) {
@@ -273,7 +320,7 @@ function stripUnwantedAttributes(html) {
     result = result.replace(/\s+style="[^"]*"/gi, '');
     result = result.replace(/\s+style='[^']*'/gi, '');
     
-    // Remove other common unwanted attributes
+    // Remove other common unwanted attributes (but preserve href on <a> tags)
     const unwantedAttrs = [
         'aria-[a-z0-9-]+',
         'role',
@@ -292,6 +339,11 @@ function stripUnwantedAttributes(html) {
         result = result.replace(new RegExp(`\\s+${attr}='[^']*'`, 'gi'), '');
         result = result.replace(new RegExp(`\\s+${attr}=[^\\s>]*`, 'gi'), '');
     });
+    
+    // Ensure anchor tags with href are preserved - fix any broken hrefs
+    // This ensures <a href="url"> format is maintained
+    result = result.replace(/<a\s+href\s*=\s*["']([^"']+)["']\s*>/gi, '<a href="$1">');
+    result = result.replace(/<a\s+href\s*=\s*([^\s>"'][^\s>]*)\s*>/gi, '<a href="$1">');
     
     // Clean up any double spaces left behind
     result = result.replace(/\s{2,}/g, ' ');
@@ -474,17 +526,28 @@ function cleanWordHtml(html) {
             .replace(/<i(\s[^>]*)?>([\s\S]*?)<\/i>/gi, '<em>$2</em>')
             // Clean attributes from tags (but preserve href on links)
             .replace(/<(p|h[1-6]|ul|ol|li|strong|em|u|br|table|thead|tbody|tr|th|td|blockquote|pre|code)\s+[^>]*?>/gi, '<$1>')
-            // Handle links - preserve href
+            // Handle links - preserve href and clean other attributes
+            // Match <a> tags with href attribute (with or without other attributes)
             .replace(/<a\s+[^>]*?href\s*=\s*["']([^"']+)["'][^>]*?>/gi, '<a href="$1">')
-            .replace(/<a\s+[^>]*?>/gi, '') // Remove a tags without href
-            // Clean up entities
-            .replace(/&nbsp;/g, ' ')
+            // Also handle href without quotes (less common but valid HTML)
+            .replace(/<a\s+[^>]*?href\s*=\s*([^\s>"'][^\s>]*)[^>]*?>/gi, '<a href="$1">')
+            // Clean up entities and special whitespace characters
+            .replace(/&nbsp;/g, ' ')  // HTML entity
+            .replace(/\u00A0/g, ' ')   // Non-breaking space (Unicode U+00A0)
+            .replace(/\u2007/g, ' ')   // Figure space
+            .replace(/\u202F/g, ' ')   // Narrow no-break space
+            .replace(/\u2009/g, ' ')   // Thin space
+            .replace(/\u200A/g, ' ')   // Hair space
+            .replace(/\uFEFF/g, '')    // Zero-width no-break space (BOM)
+            .replace(/\u200B/g, '')    // Zero-width space
+            .replace(/\u200C/g, '')    // Zero-width non-joiner
+            .replace(/\u200D/g, '')    // Zero-width joiner
             // Remove empty paragraphs and headings (multiple passes)
             .replace(/<(p|h[1-6]|li|strong|em|u|th|td)>\s*<\/\1>/gi, '')
             .replace(/<(p|h[1-6]|li|strong|em|u|th|td)>\s*<\/\1>/gi, '')
             .replace(/<(p|h[1-6]|li|strong|em|u|th|td)>\s*<\/\1>/gi, '')
             // Normalize whitespace inside tags (but preserve structure between tags)
-            .replace(/[ \t]+/g, ' ')
+            .replace(/[ \t\u00A0]+/g, ' ')
             // Remove all newlines first to clean slate
             .replace(/\n+/g, ' ')
             // Add space after inline closing tags to prevent words running together

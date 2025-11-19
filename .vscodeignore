@@ -7,3 +7,8 @@ vsc-extension-quickstart.md
 **/jsconfig.json
 **/*.map
 **/.eslintrc.json
+node_modules.nosync/**
+test-links.html
+LINK-FIX-NOTES.md
+WHITESPACE-FIX.md
+package-extension.sh
