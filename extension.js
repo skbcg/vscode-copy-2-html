@@ -552,6 +552,8 @@ function cleanWordHtml(html) {
             .replace(/\n+/g, ' ')
             // Add space after inline closing tags to prevent words running together
             .replace(/<\/(strong|em|u|a)>/gi, '</$1> ')
+            // Remove space before punctuation that follows inline tags
+            .replace(/\s+([.,;:!?])/g, '$1')
             // Clean up multiple spaces
             .replace(/  +/g, ' ')
             .trim();
