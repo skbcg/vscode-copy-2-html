@@ -39,12 +39,14 @@
   "scripts": {
     "lint": "eslint .",
     "pretest": "npm run lint",
-    "test": "node ./test/runTest.js"
+    "test": "node ./test/runTest.js",
+    "postinstall": "nosync-icloud"
   },
   "devDependencies": {
     "@types/node": "16.x",
     "@types/vscode": "^1.74.0",
-    "eslint": "^8.26.0"
+    "eslint": "^8.26.0",
+    "nosync-icloud": "^1.2.5"
   },
   "dependencies": {
     "clipboardy": "^5.0.0",

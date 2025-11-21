@@ -166,6 +166,20 @@ async function pasteAsHtml(textEditor, edit) {
         
         console.log('Processing HTML...');
         
+        // Check if HTML is already clean (either from this extension or other sources)
+        const isCleanHtml = looksLikeCleanHtml(clipboardContent);
+        console.log('HTML is already clean:', isCleanHtml);
+        
+        // If HTML is already clean, skip all processing
+        if (isCleanHtml) {
+            console.log('Clean HTML detected, skipping all processing');
+            const selection = textEditor.selection;
+            await textEditor.edit(editBuilder => {
+                editBuilder.replace(selection, clipboardContent);
+            });
+            return;
+        }
+        
         // Check if HTML needs cleaning (detect Word/Office artifacts)
         const needsCleaning = isWordHtml(clipboardContent);
         console.log('HTML needs cleaning:', needsCleaning);
@@ -182,8 +196,8 @@ async function pasteAsHtml(textEditor, edit) {
             console.log('Cleaned HTML length:', finalHtml.length);
             console.log('Cleaned HTML (first 500 chars):', finalHtml.substring(0, 500));
         } else {
-            // Already clean HTML, use as-is
-            console.log('HTML is already clean, using as-is');
+            // HTML may need other transformations but not Word cleaning
+            console.log('HTML does not have Word markers, applying transformations');
             finalHtml = clipboardContent;
         }
         
@@ -433,6 +447,81 @@ function wrapHeaderPrefixes(html) {
     }
     
     return result;
+}
+
+function looksLikeCleanHtml(html) {
+    // Check if HTML is already clean (minimal, semantic HTML without messy attributes)
+    // This detects HTML that was already processed by this extension or is naturally clean
+    
+    // Check for signs of dirty HTML
+    const dirtyMarkers = [
+        // Word/Office markers
+        'xmlns:w=',
+        'xmlns:o=',
+        'xmlns:m=',
+        '<w:',
+        '<o:',
+        'class="Mso',
+        'urn:schemas-microsoft-com',
+        'StartFragment',
+        'EndFragment',
+        '/* Style Definitions */',
+        
+        // HTML document structure (indicates a full document, not a snippet)
+        '<html',
+        '<head',
+        '<body',
+        '<!DOCTYPE',
+        
+        // Messy attributes (typical of Word/CMS output)
+        'style=',
+        'class=',
+        'id=',
+        'data-',
+        
+        // Metadata tags
+        '<meta',
+        '<link',
+        '<style',
+        '<script'
+    ];
+    
+    // If any dirty markers found, it's not clean
+    for (const marker of dirtyMarkers) {
+        if (html.includes(marker)) {
+            return false;
+        }
+    }
+    
+    // Check if HTML only contains clean semantic tags
+    // Clean tags: p, h1-h6, strong, em, ul, ol, li, a (with href only), br
+    const tagPattern = /<\/?([a-z][a-z0-9]*)[^>]*>/gi;
+    const matches = html.matchAll(tagPattern);
+    const allowedTags = ['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'strong', 'em', 'ul', 'ol', 'li', 'a', 'br', 'u', 'blockquote', 'pre', 'code'];
+    
+    for (const match of matches) {
+        const tagName = match[1].toLowerCase();
+        if (!allowedTags.includes(tagName)) {
+            console.log('Found non-semantic tag:', tagName);
+            return false;
+        }
+    }
+    
+    // Check that anchor tags only have href attribute (no other attributes)
+    const anchorPattern = /<a\s+([^>]*)>/gi;
+    const anchorMatches = html.matchAll(anchorPattern);
+    
+    for (const match of anchorMatches) {
+        const attributes = match[1];
+        // Should only contain href="..." and nothing else
+        if (!attributes.match(/^href="[^"]*"$/)) {
+            console.log('Found anchor with non-href attributes:', attributes);
+            return false;
+        }
+    }
+    
+    console.log('HTML appears to be clean (semantic tags only, no attributes)');
+    return true;
 }
 
 function isWordHtml(html) {
