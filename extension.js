@@ -142,11 +142,6 @@ async function pasteAsHtml(textEditor, edit) {
         console.log('Contains HTML tags:', clipboardContent?.includes('<') && clipboardContent?.includes('>'));
         console.log('Had HTML content:', hadHtmlContent);
         
-        // Count and log anchor tags for debugging
-        const anchorCount = (clipboardContent?.match(/<a[^>]*>/gi) || []).length;
-        const hrefCount = (clipboardContent?.match(/href\s*=\s*["'][^"']*["']/gi) || []).length;
-        console.log(`Found ${anchorCount} anchor tags with ${hrefCount} href attributes in clipboard`);
-        
         if (!clipboardContent || clipboardContent.trim().length === 0) {
             console.log('Empty clipboard content, aborting');
             vscode.window.showWarningMessage('Clipboard is empty');
@@ -164,7 +159,31 @@ async function pasteAsHtml(textEditor, edit) {
             return;
         }
         
+        // Check if this is VS Code's syntax-highlighted copy format
+        // VS Code wraps copied code in divs with syntax highlighting and HTML-encodes it
+        // Detect early and use plain text to avoid processing overhead
+        const isVSCodeFormat = clipboardContent.includes('&lt;') && 
+                              clipboardContent.includes('&gt;') && 
+                              (clipboardContent.includes('cascadia code') || 
+                               clipboardContent.includes('monospace') || 
+                               clipboardContent.includes('<meta charset'));
+        
+        if (isVSCodeFormat) {
+            console.log('Detected VS Code format, using plain text (no processing needed)');
+            const plainText = await vscode.env.clipboard.readText();
+            const selection = textEditor.selection;
+            await textEditor.edit(editBuilder => {
+                editBuilder.replace(selection, plainText);
+            });
+            return;
+        }
+        
         console.log('Processing HTML...');
+        
+        // Count and log anchor tags for debugging
+        const anchorCount = (clipboardContent?.match(/<a[^>]*>/gi) || []).length;
+        const hrefCount = (clipboardContent?.match(/href\s*=\s*["'][^"']*["']/gi) || []).length;
+        console.log(`Found ${anchorCount} anchor tags with ${hrefCount} href attributes in clipboard`);
         
         // Check if HTML is already clean (either from this extension or other sources)
         const isCleanHtml = looksLikeCleanHtml(clipboardContent);
@@ -453,6 +472,10 @@ function looksLikeCleanHtml(html) {
     // Check if HTML is already clean (minimal, semantic HTML without messy attributes)
     // This detects HTML that was already processed by this extension or is naturally clean
     
+    console.log('Checking if HTML is clean...');
+    console.log('HTML length:', html.length);
+    console.log('First 300 chars:', html.substring(0, 300));
+    
     // Check for signs of dirty HTML
     const dirtyMarkers = [
         // Word/Office markers
@@ -489,15 +512,18 @@ function looksLikeCleanHtml(html) {
     // If any dirty markers found, it's not clean
     for (const marker of dirtyMarkers) {
         if (html.includes(marker)) {
+            console.log('Found dirty marker:', marker);
             return false;
         }
     }
     
     // Check if HTML only contains clean semantic tags
-    // Clean tags: p, h1-h6, strong, em, ul, ol, li, a (with href only), br
+    // Clean tags: p, h1-h6, strong, em, ul, ol, li, a (with href only), br, span (if no attributes), div (if no attributes)
     const tagPattern = /<\/?([a-z][a-z0-9]*)[^>]*>/gi;
-    const matches = html.matchAll(tagPattern);
-    const allowedTags = ['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'strong', 'em', 'ul', 'ol', 'li', 'a', 'br', 'u', 'blockquote', 'pre', 'code'];
+    const matches = Array.from(html.matchAll(tagPattern));
+    const allowedTags = ['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'strong', 'em', 'ul', 'ol', 'li', 'a', 'br', 'u', 'blockquote', 'pre', 'code', 'span', 'div'];
+    
+    console.log(`Found ${matches.length} HTML tags`);
     
     for (const match of matches) {
         const tagName = match[1].toLowerCase();
@@ -509,10 +535,10 @@ function looksLikeCleanHtml(html) {
     
     // Check that anchor tags only have href attribute (no other attributes)
     const anchorPattern = /<a\s+([^>]*)>/gi;
-    const anchorMatches = html.matchAll(anchorPattern);
+    const anchorMatches = Array.from(html.matchAll(anchorPattern));
     
     for (const match of anchorMatches) {
-        const attributes = match[1];
+        const attributes = match[1].trim();
         // Should only contain href="..." and nothing else
         if (!attributes.match(/^href="[^"]*"$/)) {
             console.log('Found anchor with non-href attributes:', attributes);
@@ -520,7 +546,7 @@ function looksLikeCleanHtml(html) {
         }
     }
     
-    console.log('HTML appears to be clean (semantic tags only, no attributes)');
+    console.log('HTML appears to be clean (semantic tags only, minimal attributes)');
     return true;
 }
 
