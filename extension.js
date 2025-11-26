@@ -393,26 +393,52 @@ function convertBulletPointsToLists(html) {
     // Convert paragraphs starting with bullets/dashes to proper <ul><li> lists
     let result = html;
     
-    // Use regex to find all <p> tags with bullet points and group them into lists
-    // This approach keeps everything inline without introducing line breaks
+    // Comprehensive bullet character pattern (Unicode and ASCII)
+    // Includes: hyphen, en-dash, em-dash, bullet, middle dot, black circle, 
+    // white bullet, triangular bullet, hyphen bullet, and more
+    const bulletChars = '[-–—•·∙○●◦▪▸►◆◇★]';
     
-    // First, mark bullet points for processing
-    result = result.replace(/<p>\s*(?:-|•|·)\s*(.+?)<\/p>\s*/gi, '##BULLET##$1##ENDBULLET##');
+    // Pattern to match paragraphs with bullet points
+    // Allows inline HTML tags within the content (like <strong>, <a>, etc.)
+    const bulletParaPattern = new RegExp(
+        `<p>\\s*${bulletChars}\\s*([\\s\\S]*?)<\\/p>`,
+        'gi'
+    );
+    
+    // First, mark bullet points for processing (use unique markers unlikely to appear in content)
+    result = result.replace(bulletParaPattern, '⟦BULLET⟧$1⟦ENDBULLET⟧');
+    
+    // Also check for bullet points that might be inside tags like <p><span>• text</span></p>
+    // This handles Word's tendency to wrap bullets in extra tags
+    const nestedBulletPattern = new RegExp(
+        `<p>\\s*(?:<[^>]+>)*\\s*${bulletChars}\\s*([\\s\\S]*?)<\\/p>`,
+        'gi'
+    );
+    result = result.replace(nestedBulletPattern, (match, content) => {
+        // Only replace if not already marked
+        if (match.includes('⟦BULLET⟧')) return match;
+        // Strip any remaining opening tags from the captured content start
+        const cleanContent = content.replace(/^(?:<[^>]+>\s*)+/, '').trim();
+        return `⟦BULLET⟧${cleanContent}⟦ENDBULLET⟧`;
+    });
     
     // Now convert consecutive bullets into a list
-    result = result.replace(/((?:##BULLET##.+?##ENDBULLET##)+)/g, (match) => {
+    result = result.replace(/((?:⟦BULLET⟧[\s\S]*?⟦ENDBULLET⟧\s*)+)/g, (match) => {
         // Extract all bullet items
-        const items = match.match(/##BULLET##(.+?)##ENDBULLET##/g);
+        const items = match.match(/⟦BULLET⟧([\s\S]*?)⟦ENDBULLET⟧/g);
         if (!items) return match;
         
         // Convert to list items
         const listItems = items.map(item => {
-            const content = item.replace(/##BULLET##(.+?)##ENDBULLET##/, '$1').trim();
+            const content = item.replace(/⟦BULLET⟧([\s\S]*?)⟦ENDBULLET⟧/, '$1').trim();
             return `<li>${content}</li>`;
         }).join('');
         
         return `<ul>${listItems}</ul>`;
     });
+    
+    // Clean up any remaining markers (shouldn't happen, but just in case)
+    result = result.replace(/⟦BULLET⟧/g, '').replace(/⟦ENDBULLET⟧/g, '');
     
     if (result !== html) {
         console.log('Converted bullet points to proper <ul><li> lists');
@@ -423,41 +449,105 @@ function convertBulletPointsToLists(html) {
 
 function wrapHeaderPrefixes(html) {
     // Match paragraphs or plain text lines that start with H1:, H2:, etc.
-    // Handles variations like "H2:", "H2 Title:", "H2 Tag:", "h2:", etc.
+    // Handles many variations like "H2:", "H2 Title:", "H2 Tag:", "h2:", "H2 -", "## H2:", etc.
     
     let result = html;
     
-    // Pattern 1: <p><strong>H2 Tag: Title text</strong></p>
-    // First extract the H2 prefix and unwrap the strong tag
+    // Helper to build the header prefix pattern
+    // Matches: H1, H2, H3, H4, H5, H6 (case insensitive)
+    // Optionally followed by: Title, Tag, Header, Heading, or any single word
+    // Followed by: colon, dash, or similar separator
+    const headerPrefixPattern = 'H([1-6])(?:\\s+\\w+)?\\s*[:–—-]\\s*';
+    
+    // Pattern 1: <p> containing header prefix with inline formatting tags
+    // Handles: <p><strong>H2: Title</strong></p>, <p><b>H2 Tag: Title</b></p>, etc.
+    // Also handles content with nested inline tags like <strong>H2: <em>Title</em></strong>
     result = result.replace(
-        /<p>\s*<strong>\s*H([1-4])(?:\s+(?:Title|Tag))?\s*:\s*([^<]+)<\/strong>\s*<\/p>/gi,
+        new RegExp(`<p>\\s*<(?:strong|b|em|i)>\\s*${headerPrefixPattern}([\\s\\S]*?)<\\/(?:strong|b|em|i)>\\s*<\\/p>`, 'gi'),
         (match, level, text) => `<h${level}>${text.trim()}</h${level}>`
     );
     
-    // Pattern 2: <p>H2: Title text</p> or <p>H2 Title: text</p> or <p>H2 Tag: text</p>
+    // Pattern 2: <p> with header prefix directly (content may contain inline HTML)
+    // Handles: <p>H2: Title text</p>, <p>H2 Title: text with <strong>bold</strong></p>
     result = result.replace(
-        /<p>\s*H([1-4])(?:\s+(?:Title|Tag))?\s*:\s*([^<]+)<\/p>/gi,
+        new RegExp(`<p>\\s*${headerPrefixPattern}([\\s\\S]*?)<\\/p>`, 'gi'),
         (match, level, text) => `<h${level}>${text.trim()}</h${level}>`
     );
     
-    // Pattern 3: More complex - <p> with nested tags where title is in a tag
-    // Example: <p><h3></h3><strong>Title</strong></p> (malformed)
+    // Pattern 3: Header prefix may be preceded by optional formatting tags at start of <p>
+    // Handles: <p><span><strong>H2: Title</strong></span></p> and similar nested structures
     result = result.replace(
-        /<p>\s*<h([1-4])>\s*<\/h\1>\s*<(?:strong|em|b|i|u)>([^<]+)<\/(?:strong|em|b|i|u)>\s*<\/p>/gi,
+        new RegExp(`<p>(?:\\s*<[^>]+>)*\\s*${headerPrefixPattern}([\\s\\S]*?)<\\/p>`, 'gi'),
+        (match, level, text) => {
+            // Only replace if not already processed (avoid double processing)
+            if (match.includes('<h')) return match;
+            // Clean up any trailing closing tags from the content
+            const cleanText = text.replace(/(?:<\/[^>]+>\s*)+$/, '').trim();
+            return `<h${level}>${cleanText}</h${level}>`;
+        }
+    );
+    
+    // Pattern 4: Malformed nested header tags
+    // Example: <p><h3></h3><strong>Title</strong></p> (malformed from Word)
+    result = result.replace(
+        /<p>\s*<h([1-6])>\s*<\/h\1>\s*<(?:strong|em|b|i|u)>([\s\S]*?)<\/(?:strong|em|b|i|u)>\s*<\/p>/gi,
         (match, level, text) => `<h${level}>${text.trim()}</h${level}>`
     );
     
-    // Pattern 4: Headers already wrapped in <p> tags
-    // Example: <p><h2>Title</h2></p> → <h2>Title</h2>
+    // Pattern 5: Headers already wrapped in <p> tags (may contain inline HTML)
+    // Example: <p><h2>Title with <em>emphasis</em></h2></p> → <h2>Title with <em>emphasis</em></h2>
     result = result.replace(
-        /<p>\s*(<h[1-6]>[^<]*<\/h[1-6]>)\s*<\/p>/gi,
+        /<p>\s*(<h[1-6]>[\s\S]*?<\/h[1-6]>)\s*<\/p>/gi,
         '$1'
     );
     
-    // Pattern 5: Bare text lines (no tags) like "H2: Title text" or "H2 Tag: text"
+    // Pattern 6: Bare text lines (no tags) like "H2: Title text" or "H2 Tag: text"
+    // Works on multiline content, handles text that's not inside any tags
     result = result.replace(
-        /^H([1-4])(?:\s+(?:Title|Tag))?\s*:\s*(.+)$/gim,
+        new RegExp(`^${headerPrefixPattern}(.+)$`, 'gim'),
         (match, level, text) => `<h${level}>${text.trim()}</h${level}>`
+    );
+    
+    // Pattern 7: Markdown-style headers that might come through
+    // Handles: ## Title, ### Title, etc. (convert to proper h tags)
+    result = result.replace(
+        /^(#{1,6})\s+(.+)$/gim,
+        (match, hashes, text) => `<h${hashes.length}>${text.trim()}</h${hashes.length}>`
+    );
+    
+    // Pattern 8: Clean up headers - remove inline formatting and split at <br> tags
+    // Handles cases where Word wraps only part of the content in <strong> etc.
+    // Example: <h2></strong>TITLE</h2> → <h2>TITLE</h2>
+    // Also handles: <h2>TITLE<br/><br/>PARAGRAPH</h2> → <h2>TITLE</h2><p>PARAGRAPH</p>
+    result = result.replace(
+        /<h([1-6])>([\s\S]*?)<\/h\1>/gi,
+        (match, level, content) => {
+            // Strip all strong, em, b, i, u tags from header content
+            let cleanContent = content
+                .replace(/<\/?(?:strong|em|b|i|u)>/gi, '')
+                .trim();
+            
+            // Check if there are <br> tags - split header from paragraph content
+            // Match one or more consecutive <br>, <br/>, or <br /> tags
+            const brPattern = /(?:<br\s*\/?>\s*)+/gi;
+            if (brPattern.test(cleanContent)) {
+                // Split at the first occurrence of br tag(s)
+                const parts = cleanContent.split(/(?:<br\s*\/?>\s*)+/i);
+                const headerText = parts[0].trim();
+                const remainingParts = parts.slice(1).filter(p => p.trim());
+                
+                if (remainingParts.length > 0) {
+                    // Wrap remaining content in <p> tags
+                    const paragraphs = remainingParts
+                        .map(p => `<p>${p.trim()}</p>`)
+                        .join('');
+                    return `<h${level}>${headerText}</h${level}>${paragraphs}`;
+                }
+                return `<h${level}>${headerText}</h${level}>`;
+            }
+            
+            return `<h${level}>${cleanContent}</h${level}>`;
+        }
     );
     
     // Log if any replacements were made
